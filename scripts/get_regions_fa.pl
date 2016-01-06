@@ -9,8 +9,9 @@ human genome
 
 B<get_regions_fa.pl> <location file>
 
-The input file should be a tab-delimited file with columns: name,
-chromosome, start, end, strand.
+The input file should be a tab-delimited file with first line the 
+column names: name, chromosome, start, end, strand; following
+lines are the regions to be retrieved.
 
 Script fetches the sequence and flanking sequence from Ensembl so must be 
 run on a computer with an internet connection
@@ -144,6 +145,10 @@ Add this label to output files.
 
 Get SNPs with a MAF >= this value. (default: 0)
 
+=item B<--grch38>
+
+Use GRCh38 instead of hg19 (GRCh37).
+
 =item B<--dbug>
 
 Print debugging messages.
@@ -173,6 +178,7 @@ sub setup {
         FLANK => 500, # bp flanking sequence to include
         MAF => 0, # minimum MAF
         ONEPER => 0,
+        GRCh38 => 0, # use GRCh38 instead of hg19 (GRCh37)
         DBUG => 0,
     };
 
@@ -186,6 +192,7 @@ sub setup {
         'sep' => \$$p{ONEPER},
         'maf=f' => \$$p{MAF},
         'flank=i' => \$$p{FLANK},
+        'grch38' => \$$p{GRCh38},
         'dbug' => \$$p{DBUG},
     ) || die "\n";
     @ARGV || die "Need location file\n";
@@ -210,7 +217,7 @@ unless ($$p{ONEPER}) {
 printf STDERR "\nAPI version %s (%s)\n", software_version(),
     'http://www.ensembl.org/info/docs/api/api_installation.html';
 warn "Loading registry\n";
-my $registry = registry();
+my $registry = registry($p);
 warn "Getting slice adaptor (human, core, slice)\n";
 my $slice_adaptor = $registry->get_adaptor( 'Human', 'Core', 'Slice' );
 warn "  Getting vf adaptor\n";
@@ -372,10 +379,15 @@ sub parse_locations {
 
 
 sub registry {
+    my $p = shift;
     my $registry = 'Bio::EnsEMBL::Registry';
+    # use port 3337 for GRCh37; default port 3306 for GRCh38
+    my $port = $$p{GRCh38} ? 3306 : 3337;
     $registry->load_registry_from_db(
         -host => 'ensembldb.ensembl.org',
-        -user => 'anonymous');
+        -user => 'anonymous',
+        -port => $port,
+        ); 
     return $registry;
 }
 

@@ -154,6 +154,10 @@ Get SNPs with a MAF >= this value. (default: 0)
 
 Remove UTRs from exons.
 
+=item B<--grch38>
+
+Use GRCh38 instead of hg19 (GRCh37).
+
 =item B<--dbug>
 
 Print debugging messages.
@@ -191,6 +195,7 @@ sub setup {
         RM_UTRS => 0, # do not include utrs with exon seqs
         CODING => 0, # only use protein coding transcripts
         CANONICAL => 0, # only use canonical transcript
+        GRCh38 => 0, # use GRCh38 instead of hg19 (GRCh37)
         MAF => 0, # minimum MAF
         DBUG => 0,
     };
@@ -203,6 +208,7 @@ sub setup {
         'canonical' => \$$p{CANONICAL},
         'coding' => \$$p{CODING},
         'rmutrs' => \$$p{RM_UTRS},
+        'grch38' => \$$p{GRCh38},
         'exonsummary!' => \$$p{EXONSUMMARY},
         'rssummary!' => \$$p{RSSUMMARY},
         'label=s' => \$$p{LABEL},
@@ -252,7 +258,7 @@ my $snphash = $$p{SNPFILE} ? read_snp_file($$p{SNPFILE}) : undef;
 printf STDERR "\nAPI version %s (%s)\n", software_version(),
     'http://www.ensembl.org/info/docs/api/api_installation.html';
 warn "Loading registry\n";
-my $registry = registry();
+my $registry = registry($p);
 warn "Getting gene adaptor (human, core, gene)\n";
 my $gene_adaptor = $registry->get_adaptor( 'Human', 'Core', 'Gene' );
 
@@ -307,10 +313,15 @@ sub read_snp_file {
 }
 
 sub registry {
+    my $p = shift;
     my $registry = 'Bio::EnsEMBL::Registry';
+    # use port 3337 for GRCh37; default port 3306 for GRCh38
+    my $port = $$p{GRCh38} ? 3306 : 3337;
     $registry->load_registry_from_db(
         -host => 'ensembldb.ensembl.org',
-        -user => 'anonymous');
+        -user => 'anonymous',
+        -port => $port, 
+        );
     return $registry;
 }
 
