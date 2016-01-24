@@ -12,6 +12,9 @@ B<call_primers.pl> *.gene.fa *.sequence.fa
 
 =cut
 
+# 1/6/2016 Do not need to check for RE sites. Remove optimum product size.
+#          Change range to 300-425 instead of 350-425 bp
+#          Change flank to 10 instead of 20 bp
 #############################################################################
 
 =head1 REQUIRES
@@ -192,7 +195,7 @@ sub setup {
     my $p = {
         P3EXE => 'primer3_core',
         P3CONFIG_PATH => '/opt/primer3_config/',
-        PRODUCT_MIN_SIZE => 350,
+        PRODUCT_MIN_SIZE => 300,
         PRODUCT_OPT_SIZE => 375,
         PRODUCT_MAX_SIZE => 425,
         PRIMER_MIN_SIZE=>18,
@@ -203,10 +206,10 @@ sub setup {
         PRIMER_NUM_RETURN_left => 15,
         OUTDIR => undef,
         OUTLABEL => enumdate(),
-        TARGET_FLANK => 20, # num bases flanking target 
+        TARGET_FLANK => 10, # num bases flanking target 
                             # region to include in amplicon
         P3FILES_SUBDIR => 'p3files',
-        MIN_MAF => 0.05,
+        MIN_MAF => 0.10,
         FORCE => 0,
         P3PARAMS => \%P3_PARAMS,
         DBUG => 0,
@@ -224,7 +227,7 @@ sub setup {
     ) || die "\n";
     $$p{FLANKSIZE} = $$p{PRODUCT_MAX_SIZE} - 2*$$p{TARGET_FLANK} -
         $$p{PRIMER_MIN_SIZE};
-    $P3_PARAMS{PRIMER_PRODUCT_OPT_SIZE} = $$p{PRODUCT_OPT_SIZE};
+#    $P3_PARAMS{PRIMER_PRODUCT_OPT_SIZE} = $$p{PRODUCT_OPT_SIZE};
     $P3_PARAMS{PRIMER_PRODUCT_SIZE_RANGE} = 
         sprintf "%d-%d", $$p{PRODUCT_MIN_SIZE}, $$p{PRODUCT_MAX_SIZE};
     $P3_PARAMS{PRIMER_THERMODYNAMIC_PARAMETERS_PATH} = $$p{P3CONFIG_PATH};
@@ -383,10 +386,13 @@ sub parse_snpfile {
     foreach my $l (@lines) {
         my @v = split(/\t/, $l);
         my %d = map { $_=>shift @v } @fields;
-        my $mafv = defined($d{MAF}) ? $d{MAF} : 'n/a';
-        $d{desc} = "$d{snp} $d{chrom}:$d{pos} (MAF: $mafv)";
-        $num++;
-        $snps{$d{chrom}}{$d{pos}} = \%d;
+        if ($d{MAF} && $d{MAF} >=$$p{MIN_MAF}) {
+            my $mafv = $d{MAF} ? $d{MAF} : 'n/a';
+            $d{desc} = "$d{snp} $d{chrom}:$d{pos} (MAF: $mafv)";
+            if ($$p{DBUG}) { print STDERR $d{desc}."\n"; }
+            $num++;
+            $snps{$d{chrom}}{$d{pos}} = \%d;
+        }
     }
     warn "  Got $num snps\n";
     my $tot = 0;
@@ -415,25 +421,6 @@ sub snps_in_interval {
     (\%seqsnps);
 }
 
-sub num_snps_above_minmaf {
-    my $lsnps = shift;
-    my $rsnps = shift;
-    my $minmaf = shift;
-
-    my $numleft = 0;
-    my $numright = 0;
-    # some snps do not have MAF values
-    if ($minmaf) {
-        $numleft = grep($$lsnps{$_}{MAF} && $$lsnps{$_}{MAF} >= $minmaf, 
-            keys %$lsnps);
-        $numright = grep($$lsnps{$_}{MAF} && $$rsnps{$_}{MAF} >= $minmaf, 
-            keys %$rsnps);
-    } else {
-        $numleft = keys %$lsnps;
-        $numright = keys %$rsnps;
-    }
-    ($numleft+$numright);
-}
 #-----------------------------------------------------------------------------
 
 sub pick_primers {
@@ -452,7 +439,7 @@ sub pick_primers {
         warn "\n($num/$limit)==== SeqID $seqid\n";
         my ($targetlen, @seqs) = get_sequence_template($seqid, $seqhash, $p);
         my $minsize = $targetlen + 2*$$p{PRIMER_OPT_SIZE};
-        my $numpieces = int($targetlen/$$p{PRODUCT_MIN_SIZE}+1);
+        my $numpieces = int($targetlen/$$p{PRODUCT_MAX_SIZE}+1);
         warn "  Targetlen $targetlen\t(minsize $minsize)\n";
         my %iterres;
         for(my $iter=0; $iter<50; $iter++) {
@@ -700,7 +687,8 @@ sub pick_pcr_primer_pair {
     my $target_len = length($targetseq);
     my %p3in = %{ $$p{P3PARAMS} };
     $p3in{SEQUENCE_ID} = $segid.$FR;
-    $p3in{SEQUENCE_TEMPLATE} = replace_REsite_with_N($seq);
+#    $p3in{SEQUENCE_TEMPLATE} = replace_REsite_with_N($seq);
+    $p3in{SEQUENCE_TEMPLATE} = $seq;
     $p3in{SEQUENCE_TARGET} = "$target_start,$target_len";
     $p3in{PRIMER_PICK_LEFT_PRIMER} = 1,
     $p3in{PRIMER_PICK_RIGHT_PRIMER} = 1,
@@ -714,6 +702,7 @@ sub pick_pcr_primer_pair {
     return filter_primer_pairs($primers, $FR);
 }
 
+# Do not need to check for RE sites 1/6/2016
 sub replace_REsite_with_N {
     my $seq = shift;
 
@@ -750,8 +739,8 @@ sub filter_primer_pairs {
                 my $phash = $$pprimers{$k}[$i]{$side};
                 my $pseq = $$phash{sequence};
                 push(@pairseqs, $pseq);
-                my $reSite = hasREsite($pseq);
-                if ($reSite) { push(@reSite, "$side $pseq $reSite") }
+#                my $reSite = hasREsite($pseq);
+#                if ($reSite) { push(@reSite, "$side $pseq $reSite") }
             }
             if (@reSite) {
                 my $num = $i+1;
@@ -823,7 +812,7 @@ sub primer_pair_info {
         my @lsnps = map { $$lsnps{$_}{desc} } sort {$a<=>$b} keys %$lsnps;
         my $rsnps = snps_in_interval($snphash, $rchrstart, $rchrend);
         my @rsnps = map { $$rsnps{$_}{desc} } sort {$a<=>$b} keys %$rsnps;
-        my $totsnps = num_snps_above_minmaf($lsnps, $rsnps, $$p{MIN_MAF});
+        my $totsnps = @lsnps + @rsnps;
         $num++;
         my ($ll, $rl) = ('left','right');
         if ($FR eq 'R') { 
@@ -1054,7 +1043,7 @@ sub classify_exons {
     my $gene = '?';
     foreach my $exonid (@$exonids) {
         $gene = $exonid; $gene =~ s/:.*//;
-        warn "exonid $exonid\n";
+#        warn "exonid $exonid\n";
         $num++;
         my $seqlen = $$seqhash{$exonid}{seqlen};
         my $previd = $$seqhash{$exonid}{prevseq};
